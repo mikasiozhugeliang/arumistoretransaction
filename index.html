@@ -113,18 +113,43 @@
     <div class="card">
       <h2 id="formTitle">Tambah / Update Stok Barang</h2>
       <p class="sub" style="margin-top:-8px;">Hanya untuk barang masuk (harga beli). Harga jual diisi saat transaksi penjualan.</p>
-      <div class="grid3">
+      <div>
+        <label>Cara input stok masuk *</label>
+        <select id="fInputMode" onchange="toggleInputMode()">
+          <option value="pcs">Per PCS (jumlah satuan langsung)</option>
+          <option value="pack">Per PACK (isi banyak pcs per pack)</option>
+        </select>
+      </div>
+      <div id="pcsModeFields" class="grid3">
         <div>
           <label>Nama barang *</label>
           <input id="fName" placeholder="Contoh: Beras 5kg">
         </div>
         <div>
-          <label>Jumlah stok masuk *</label>
+          <label>Jumlah stok masuk (pcs) *</label>
           <input id="fQty" type="number" min="0" placeholder="0" oninput="updateBuyPreview()">
         </div>
         <div>
           <label>Total harga beli (Rp) *</label>
           <input id="fBuy" type="number" min="0" placeholder="0" oninput="updateBuyPreview()">
+        </div>
+      </div>
+      <div id="packModeFields" class="grid3" style="display:none;">
+        <div>
+          <label>Nama barang *</label>
+          <input id="fNamePack" placeholder="Contoh: Indomie Goreng">
+        </div>
+        <div>
+          <label>Jumlah pack dibeli *</label>
+          <input id="fPackCount" type="number" min="0" placeholder="Contoh: 1" oninput="updateBuyPreview()">
+        </div>
+        <div>
+          <label>Isi per pack (pcs) *</label>
+          <input id="fPackSize" type="number" min="1" placeholder="Contoh: 10" oninput="updateBuyPreview()">
+        </div>
+        <div>
+          <label>Harga per pack (Rp) *</label>
+          <input id="fPackPrice" type="number" min="0" placeholder="Contoh: 10000" oninput="updateBuyPreview()">
         </div>
       </div>
       <label>Tanggal & jam stok masuk *</label>
@@ -166,6 +191,10 @@
           <input id="sPrice" type="number" min="0" placeholder="0" oninput="updateSalePreview()">
         </div>
         <div>
+          <label>Diskon total transaksi (Rp) — opsional</label>
+          <input id="sDiscount" type="number" min="0" placeholder="Kosongkan jika tidak ada diskon" oninput="updateSalePreview()">
+        </div>
+        <div>
           <label>Nomor telepon pembeli</label>
           <input id="sPhone" placeholder="08xxxxxxxxxx">
         </div>
@@ -184,7 +213,8 @@
     </div>
 
     <div class="card">
-      <h2>Riwayat Transaksi Penjualan</h2>
+      <h2>Riwayat Transaksi Penjualan (Hari Ini)</h2>
+      <p class="sub" style="margin-top:-8px;">Transaksi hari sebelumnya otomatis tidak ditampilkan di sini (bukan dihapus permanen) supaya tidak menumpuk. Cek tab <b>Laporan</b> untuk melihat riwayat transaksi tanggal lain.</p>
       <div id="salesTableWrap"></div>
     </div>
   </div>
@@ -217,9 +247,11 @@
     <div class="stats">
       <div class="stat"><div class="label">Jumlah transaksi</div><div class="val" id="repTxCount">0</div></div>
       <div class="stat"><div class="label">Total unit terjual</div><div class="val" id="repUnits">0</div></div>
-      <div class="stat"><div class="label">Total omset</div><div class="val" id="repOmset">Rp 0</div></div>
+      <div class="stat"><div class="label">Total omset (setelah diskon)</div><div class="val" id="repOmset">Rp 0</div></div>
+      <div class="stat"><div class="label">Total diskon diberikan</div><div class="val" id="repDiscount">Rp 0</div></div>
       <div class="stat"><div class="label">Total modal terjual</div><div class="val" id="repCogs">Rp 0</div></div>
       <div class="stat"><div class="label">Total profit</div><div class="val" id="repProfit">Rp 0</div></div>
+      <div class="stat"><div class="label">Profit % dari modal</div><div class="val" id="repProfitPct">0%</div></div>
     </div>
 
     <div class="card">
@@ -275,6 +307,7 @@ let deleteTarget = null;
 let itemsRef = null;
 let salesRef = null;
 let activeTab = 'stock';
+let midnightCheckTimer = null;
 
 function fmtRp(n) {
   n = Number(n) || 0;
@@ -289,16 +322,40 @@ function checkAdminAccess() {
 }
 checkAdminAccess();
 
+function toggleInputMode() {
+  const mode = document.getElementById('fInputMode').value;
+  document.getElementById('pcsModeFields').style.display = mode === 'pcs' ? 'grid' : 'none';
+  document.getElementById('packModeFields').style.display = mode === 'pack' ? 'grid' : 'none';
+  document.getElementById('buyPreview').style.display = 'none';
+}
+
 function updateBuyPreview() {
-  const qty = Number(document.getElementById('fQty').value) || 0;
-  const total = Number(document.getElementById('fBuy').value) || 0;
+  const mode = document.getElementById('fInputMode').value;
   const el = document.getElementById('buyPreview');
-  if (qty > 0 && total > 0) {
-    const perUnit = total / qty;
-    el.style.display = 'block';
-    el.innerHTML = 'Harga beli per pcs otomatis: <b>' + fmtRp(perUnit) + ' / pcs</b> (dari ' + fmtRp(total) + ' ÷ ' + qty + ' pcs)';
+  if (mode === 'pcs') {
+    const qty = Number(document.getElementById('fQty').value) || 0;
+    const total = Number(document.getElementById('fBuy').value) || 0;
+    if (qty > 0 && total > 0) {
+      const perUnit = total / qty;
+      el.style.display = 'block';
+      el.innerHTML = 'Harga beli per pcs otomatis: <b>' + fmtRp(perUnit) + ' / pcs</b> (dari ' + fmtRp(total) + ' ÷ ' + qty + ' pcs)';
+    } else {
+      el.style.display = 'none';
+    }
   } else {
-    el.style.display = 'none';
+    const packCount = Number(document.getElementById('fPackCount').value) || 0;
+    const packSize = Number(document.getElementById('fPackSize').value) || 0;
+    const packPrice = Number(document.getElementById('fPackPrice').value) || 0;
+    if (packCount > 0 && packSize > 0 && packPrice > 0) {
+      const totalQtyPcs = packCount * packSize;
+      const totalHarga = packCount * packPrice;
+      const perPcs = packPrice / packSize;
+      el.style.display = 'block';
+      el.innerHTML = 'Total stok masuk: <b>' + totalQtyPcs + ' pcs</b> — Total harga beli: <b>' + fmtRp(totalHarga) +
+        '</b> — Harga per pcs otomatis: <b>' + fmtRp(perPcs) + ' / pcs</b> (dari ' + fmtRp(packPrice) + ' ÷ ' + packSize + ' pcs per pack)';
+    } else {
+      el.style.display = 'none';
+    }
   }
 }
 
@@ -306,16 +363,22 @@ function updateSalePreview() {
   const itemId = document.getElementById('sItemId').value;
   const qty = Number(document.getElementById('sQty').value) || 0;
   const price = Number(document.getElementById('sPrice').value) || 0;
+  const discount = Number(document.getElementById('sDiscount').value) || 0;
   const el = document.getElementById('salePreview');
   const item = items[itemId];
   if (item && qty > 0 && price > 0) {
     const buyPerUnit = Number(item.buyPrice) || 0;
-    const profitPerUnit = price - buyPerUnit;
-    const totalSale = qty * price;
-    const totalProfit = qty * profitPerUnit;
+    const subtotal = qty * price;
+    const totalAfterDiscount = Math.max(0, subtotal - discount);
+    const totalCogs = qty * buyPerUnit;
+    const totalProfit = totalAfterDiscount - totalCogs;
     el.style.display = 'block';
-    el.innerHTML = 'Total jual: <b>' + fmtRp(totalSale) + '</b> — Harga beli/pcs: ' + fmtRp(buyPerUnit) +
-      ' — Profit/pcs: <b>' + fmtRp(profitPerUnit) + '</b> — <b>Total profit: ' + fmtRp(totalProfit) + '</b>';
+    let html = 'Subtotal: <b>' + fmtRp(subtotal) + '</b>';
+    if (discount > 0) {
+      html += ' — Diskon: <b>-' + fmtRp(discount) + '</b> — Total setelah diskon: <b>' + fmtRp(totalAfterDiscount) + '</b>';
+    }
+    html += ' — Harga beli/pcs: ' + fmtRp(buyPerUnit) + ' — <b>Total profit: ' + fmtRp(totalProfit) + '</b>';
+    el.innerHTML = html;
   } else {
     el.style.display = 'none';
   }
@@ -425,6 +488,7 @@ async function createPin() {
 function logout() {
   if (itemsRef) itemsRef.off();
   if (salesRef) salesRef.off();
+  if (midnightCheckTimer) { clearInterval(midnightCheckTimer); midnightCheckTimer = null; }
   currentPin = null;
   items = {};
   sales = {};
@@ -479,12 +543,21 @@ function startApp() {
   setDefaultDateTime('fDateTime');
   setDefaultDateTime('sDateTime');
   applyReportPreset();
+
+  if (midnightCheckTimer) clearInterval(midnightCheckTimer);
+  midnightCheckTimer = setInterval(() => {
+    renderSales();
+  }, 60000);
 }
 
 function clearForm() {
   document.getElementById('fName').value = '';
   document.getElementById('fQty').value = '';
   document.getElementById('fBuy').value = '';
+  document.getElementById('fNamePack').value = '';
+  document.getElementById('fPackCount').value = '';
+  document.getElementById('fPackSize').value = '';
+  document.getElementById('fPackPrice').value = '';
   document.getElementById('formErr').style.display = 'none';
   setDefaultDateTime('fDateTime');
 }
@@ -506,22 +579,39 @@ function getDateTimeValue(id) {
 }
 
 async function saveItem() {
-  const name = document.getElementById('fName').value.trim();
-  const qty = document.getElementById('fQty').value;
-  const totalBuy = document.getElementById('fBuy').value;
+  const mode = document.getElementById('fInputMode').value;
   const errEl = document.getElementById('formErr');
   errEl.style.display = 'none';
 
-  if (!name || qty === '' || totalBuy === '' || Number(qty) <= 0 || Number(totalBuy) < 0) {
-    errEl.textContent = 'Nama barang, jumlah stok, dan total harga beli wajib diisi dengan angka valid (jumlah harus lebih dari 0).';
-    errEl.style.display = 'block';
-    return;
+  let name, addQty, addTotal;
+
+  if (mode === 'pcs') {
+    name = document.getElementById('fName').value.trim();
+    const qty = document.getElementById('fQty').value;
+    const totalBuy = document.getElementById('fBuy').value;
+    if (!name || qty === '' || totalBuy === '' || Number(qty) <= 0 || Number(totalBuy) < 0) {
+      errEl.textContent = 'Nama barang, jumlah stok, dan total harga beli wajib diisi dengan angka valid (jumlah harus lebih dari 0).';
+      errEl.style.display = 'block';
+      return;
+    }
+    addQty = Number(qty);
+    addTotal = Number(totalBuy);
+  } else {
+    name = document.getElementById('fNamePack').value.trim();
+    const packCount = document.getElementById('fPackCount').value;
+    const packSize = document.getElementById('fPackSize').value;
+    const packPrice = document.getElementById('fPackPrice').value;
+    if (!name || packCount === '' || packSize === '' || packPrice === '' || Number(packCount) <= 0 || Number(packSize) <= 0 || Number(packPrice) < 0) {
+      errEl.textContent = 'Nama barang, jumlah pack, isi per pack, dan harga per pack wajib diisi dengan angka valid.';
+      errEl.style.display = 'block';
+      return;
+    }
+    addQty = Number(packCount) * Number(packSize);
+    addTotal = Number(packCount) * Number(packPrice);
   }
 
   const saveBtn = document.getElementById('saveBtn');
   saveBtn.disabled = true;
-  const addQty = Number(qty);
-  const addTotal = Number(totalBuy);
   const newUnitPrice = addTotal / addQty;
   const chosenTime = getDateTimeValue('fDateTime');
 
@@ -561,9 +651,11 @@ function editItem(id) {
   const item = items[id];
   if (!item) return;
   editingId = id;
+  document.getElementById('fInputMode').value = 'pcs';
+  toggleInputMode();
   document.getElementById('fName').value = item.name || '';
   document.getElementById('fQty').value = '';
-  document.getElementById('fQty').placeholder = 'Jumlah stok TAMBAHAN (baru masuk)';
+  document.getElementById('fQty').placeholder = 'Jumlah stok TAMBAHAN (baru masuk, pcs)';
   document.getElementById('fBuy').value = '';
   document.getElementById('fBuy').placeholder = 'Total harga beli untuk tambahan ini';
   document.getElementById('formTitle').textContent = 'Tambah Stok Masuk: ' + item.name + ' (sisa saat ini: ' + (Number(item.qty)||0) + ', harga/pcs: ' + fmtRp(item.buyPrice) + ')';
@@ -639,6 +731,7 @@ async function saveSale() {
   const itemId = document.getElementById('sItemId').value;
   const qty = document.getElementById('sQty').value;
   const price = document.getElementById('sPrice').value;
+  const discountRaw = document.getElementById('sDiscount').value;
   const phone = document.getElementById('sPhone').value.trim();
   const ref = document.getElementById('sRef').value.trim();
   const address = document.getElementById('sAddress').value.trim();
@@ -660,6 +753,18 @@ async function saveSale() {
     errEl.style.display = 'block';
     return;
   }
+  const discount = discountRaw === '' ? 0 : Number(discountRaw);
+  if (discount < 0) {
+    errEl.textContent = 'Diskon tidak boleh angka negatif.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const subtotalCheck = Number(qty) * Number(price);
+  if (discount > subtotalCheck) {
+    errEl.textContent = 'Diskon (' + fmtRp(discount) + ') tidak boleh lebih besar dari subtotal (' + fmtRp(subtotalCheck) + ').';
+    errEl.style.display = 'block';
+    return;
+  }
   const currentStock = Number(items[itemId].qty) || 0;
   if (Number(qty) > currentStock) {
     errEl.textContent = 'Jumlah terjual (' + qty + ') melebihi sisa stok (' + currentStock + ').';
@@ -678,11 +783,12 @@ async function saveSale() {
     await itemsRef.child(itemId).update({ qty: newStock, updatedAt: Date.now() });
     await salesRef.push({
       itemId, itemName: items[itemId].name,
-      qty: Number(qty), sellPrice: Number(price), buyPriceAtSale,
+      qty: Number(qty), sellPrice: Number(price), buyPriceAtSale, discount,
       phone, ref, address, createdAt: chosenTime
     });
     document.getElementById('sQty').value = '';
     document.getElementById('sPrice').value = '';
+    document.getElementById('sDiscount').value = '';
     document.getElementById('sPhone').value = '';
     document.getElementById('sRef').value = '';
     document.getElementById('sAddress').value = '';
@@ -709,7 +815,9 @@ function renderStats() {
   });
   let totalSales = 0, totalCogs = 0;
   saleList.forEach(s => {
-    totalSales += (Number(s.qty)||0) * (Number(s.sellPrice)||0);
+    const subtotal = (Number(s.qty)||0) * (Number(s.sellPrice)||0);
+    const discount = Number(s.discount) || 0;
+    totalSales += Math.max(0, subtotal - discount);
     const buyPrice = s.buyPriceAtSale !== undefined ? Number(s.buyPriceAtSale) : (items[s.itemId] ? Number(items[s.itemId].buyPrice)||0 : 0);
     totalCogs += (Number(s.qty)||0) * buyPrice;
   });
@@ -718,6 +826,12 @@ function renderStats() {
   document.getElementById('statBuy').textContent = fmtRp(totalBuy);
   document.getElementById('statSales').textContent = fmtRp(totalSales);
   document.getElementById('statProfit').textContent = fmtRp(totalSales - totalCogs);
+}
+
+function isSameLocalDay(ts, ref) {
+  const d1 = new Date(ts);
+  const d2 = ref;
+  return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 }
 
 function renderStock() {
@@ -749,21 +863,25 @@ function renderStock() {
 }
 
 function renderSales() {
-  const list = Object.keys(sales).map(id => ({ id, ...sales[id] }));
+  const now = new Date();
+  const list = Object.keys(sales).map(id => ({ id, ...sales[id] }))
+    .filter(s => isSameLocalDay(s.createdAt || 0, now));
   const wrap = document.getElementById('salesTableWrap');
   if (list.length === 0) {
-    wrap.innerHTML = '<div class="empty">Belum ada transaksi penjualan.</div>';
+    wrap.innerHTML = '<div class="empty">Belum ada transaksi penjualan hari ini.</div>';
     return;
   }
   const sorted = list.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
   let html = '<div style="overflow-x:auto;"><table><thead><tr>' +
-    '<th>Tanggal</th><th>Barang</th><th>Qty</th><th>Harga jual/unit</th><th>Harga beli/pcs</th><th>Total jual</th><th>Profit</th><th>Telepon</th><th>Alamat</th><th>No. Ref</th><th>Aksi</th>' +
+    '<th>Tanggal</th><th>Barang</th><th>Qty</th><th>Harga jual/unit</th><th>Diskon</th><th>Harga beli/pcs</th><th>Total jual</th><th>Profit</th><th>Telepon</th><th>Alamat</th><th>No. Ref</th><th>Aksi</th>' +
     '</tr></thead><tbody>';
   sorted.forEach(s => {
     const q = Number(s.qty)||0;
-    const total = q * (Number(s.sellPrice)||0);
+    const subtotal = q * (Number(s.sellPrice)||0);
+    const discount = Number(s.discount) || 0;
+    const total = Math.max(0, subtotal - discount);
     const buyPcs = s.buyPriceAtSale !== undefined ? Number(s.buyPriceAtSale) : (items[s.itemId] ? Number(items[s.itemId].buyPrice)||0 : 0);
-    const profit = (Number(s.sellPrice)||0 - buyPcs) * q;
+    const profit = total - (buyPcs * q);
     const profitColor = profit >= 0 ? '#166534' : '#b91c1c';
     const dateStr = s.createdAt ? new Date(s.createdAt).toLocaleString('id-ID') : '-';
     html += '<tr>' +
@@ -771,6 +889,7 @@ function renderSales() {
       '<td>' + escapeHtml(s.itemName||'-') + '</td>' +
       '<td>' + q + '</td>' +
       '<td class="tc-r">' + fmtRp(s.sellPrice) + '</td>' +
+      '<td class="tc-r">' + (discount > 0 ? '-' + fmtRp(discount) : '-') + '</td>' +
       '<td class="tc-r">' + fmtRp(buyPcs) + '</td>' +
       '<td class="tc-r">' + fmtRp(total) + '</td>' +
       '<td class="tc-r" style="color:' + profitColor + '; font-weight:700;">' + fmtRp(profit) + '</td>' +
@@ -819,31 +938,40 @@ function renderReport() {
     .filter(s => s.createdAt >= fromTs && s.createdAt <= toTs)
     .sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
 
-  let totalUnits = 0, totalOmset = 0, totalCogs = 0;
+  let totalUnits = 0, totalOmset = 0, totalCogs = 0, totalDiscount = 0;
   saleList.forEach(s => {
     const q = Number(s.qty)||0;
+    const subtotal = q * (Number(s.sellPrice)||0);
+    const discount = Number(s.discount) || 0;
     totalUnits += q;
-    totalOmset += q * (Number(s.sellPrice)||0);
+    totalOmset += Math.max(0, subtotal - discount);
+    totalDiscount += discount;
     const buyPcs = s.buyPriceAtSale !== undefined ? Number(s.buyPriceAtSale) : (items[s.itemId] ? Number(items[s.itemId].buyPrice)||0 : 0);
     totalCogs += q * buyPcs;
   });
   const totalProfit = totalOmset - totalCogs;
+  const totalProfitPct = totalCogs > 0 ? (totalProfit / totalCogs) * 100 : 0;
 
   document.getElementById('repTxCount').textContent = saleList.length;
   document.getElementById('repUnits').textContent = totalUnits.toLocaleString('id-ID');
   document.getElementById('repOmset').textContent = fmtRp(totalOmset);
+  document.getElementById('repDiscount').textContent = fmtRp(totalDiscount);
   document.getElementById('repCogs').textContent = fmtRp(totalCogs);
   document.getElementById('repProfit').textContent = fmtRp(totalProfit);
+  document.getElementById('repProfitPct').textContent = totalProfitPct.toFixed(1) + '%';
 
   const dailyMap = {};
   saleList.forEach(s => {
     const d = new Date(s.createdAt);
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    if (!dailyMap[key]) dailyMap[key] = { units: 0, omset: 0, cogs: 0, count: 0, items: {} };
+    if (!dailyMap[key]) dailyMap[key] = { units: 0, omset: 0, cogs: 0, discount: 0, count: 0, items: {} };
     const q = Number(s.qty)||0;
+    const subtotal = q * (Number(s.sellPrice)||0);
+    const discount = Number(s.discount) || 0;
     const buyPcs = s.buyPriceAtSale !== undefined ? Number(s.buyPriceAtSale) : (items[s.itemId] ? Number(items[s.itemId].buyPrice)||0 : 0);
     dailyMap[key].units += q;
-    dailyMap[key].omset += q * (Number(s.sellPrice)||0);
+    dailyMap[key].omset += Math.max(0, subtotal - discount);
+    dailyMap[key].discount += discount;
     dailyMap[key].cogs += q * buyPcs;
     dailyMap[key].count += 1;
     const iName = s.itemName || '-';
@@ -859,6 +987,7 @@ function renderReport() {
     dailyKeys.forEach(key => {
       const d = dailyMap[key];
       const profit = d.omset - d.cogs;
+      const profitPct = d.cogs > 0 ? (profit / d.cogs) * 100 : 0;
       const dateLabel = new Date(key + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       const itemsSummary = Object.keys(d.items).map(name => name + ' (' + d.items[name] + 'x)').join(', ');
       html += '<div style="border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; margin-bottom:10px;">' +
@@ -867,8 +996,10 @@ function renderReport() {
         '<div style="display:flex; gap:16px; flex-wrap:wrap; font-size:13px;">' +
         '<div>Transaksi: <b>' + d.count + '</b></div>' +
         '<div>Unit: <b>' + d.units + '</b></div>' +
+        '<div>Diskon: <b>' + fmtRp(d.discount) + '</b></div>' +
         '<div>Omset: <b>' + fmtRp(d.omset) + '</b></div>' +
         '<div>Profit: <b style="color:' + (profit >= 0 ? '#166534' : '#b91c1c') + ';">' + fmtRp(profit) + '</b></div>' +
+        '<div>Profit %: <b style="color:' + (profit >= 0 ? '#166534' : '#b91c1c') + ';">' + profitPct.toFixed(1) + '%</b></div>' +
         '</div></div>';
     });
     dailyWrap.innerHTML = html;
@@ -880,19 +1011,22 @@ function renderReport() {
     return;
   }
   let html2 = '<div style="overflow-x:auto;"><table><thead><tr>' +
-    '<th>Tanggal</th><th>Barang</th><th>Qty</th><th>Harga jual</th><th>Total</th><th>Profit</th><th>Telepon</th><th>No. Ref</th>' +
+    '<th>Tanggal</th><th>Barang</th><th>Qty</th><th>Harga jual</th><th>Diskon</th><th>Total</th><th>Profit</th><th>Telepon</th><th>No. Ref</th>' +
     '</tr></thead><tbody>';
   saleList.forEach(s => {
     const q = Number(s.qty)||0;
-    const total = q * (Number(s.sellPrice)||0);
+    const subtotal = q * (Number(s.sellPrice)||0);
+    const discount = Number(s.discount) || 0;
+    const total = Math.max(0, subtotal - discount);
     const buyPcs = s.buyPriceAtSale !== undefined ? Number(s.buyPriceAtSale) : (items[s.itemId] ? Number(items[s.itemId].buyPrice)||0 : 0);
-    const profit = (Number(s.sellPrice)||0 - buyPcs) * q;
+    const profit = total - (buyPcs * q);
     const dateStr = s.createdAt ? new Date(s.createdAt).toLocaleString('id-ID') : '-';
     html2 += '<tr>' +
       '<td>' + dateStr + '</td>' +
       '<td>' + escapeHtml(s.itemName||'-') + '</td>' +
       '<td>' + q + '</td>' +
       '<td class="tc-r">' + fmtRp(s.sellPrice) + '</td>' +
+      '<td class="tc-r">' + (discount > 0 ? '-' + fmtRp(discount) : '-') + '</td>' +
       '<td class="tc-r">' + fmtRp(total) + '</td>' +
       '<td class="tc-r" style="color:' + (profit>=0?'#166534':'#b91c1c') + '; font-weight:700;">' + fmtRp(profit) + '</td>' +
       '<td>' + escapeHtml(s.phone||'-') + '</td>' +
