@@ -124,9 +124,10 @@
       <div id="pcsModeFields" class="grid3">
         <div>
           <label>Nama barang *</label>
-          <input id="fName" list="itemNameList" placeholder="Contoh: Beras 5kg" oninput="checkDuplicateName('fName','dupWarnPcs')">
+          <input id="fName" list="itemNameList" placeholder="Contoh: Beras 5kg" oninput="checkDuplicateName('fName','dupWarnPcs'); showNameSuggestions('fName','suggestBoxPcs')">
           <datalist id="itemNameList"></datalist>
           <div id="dupWarnPcs" class="small" style="color:#b45309; margin-top:-8px; margin-bottom:8px; display:none;"></div>
+          <div id="suggestBoxPcs" style="display:none; margin-top:-8px; margin-bottom:8px;"></div>
         </div>
         <div>
           <label>Jumlah stok masuk (pcs) *</label>
@@ -140,8 +141,9 @@
       <div id="packModeFields" class="grid3" style="display:none;">
         <div>
           <label>Nama barang *</label>
-          <input id="fNamePack" list="itemNameList" placeholder="Contoh: Indomie Goreng" oninput="checkDuplicateName('fNamePack','dupWarnPack')">
+          <input id="fNamePack" list="itemNameList" placeholder="Contoh: Indomie Goreng" oninput="checkDuplicateName('fNamePack','dupWarnPack'); showNameSuggestions('fNamePack','suggestBoxPack')">
           <div id="dupWarnPack" class="small" style="color:#b45309; margin-top:-8px; margin-bottom:8px; display:none;"></div>
+          <div id="suggestBoxPack" style="display:none; margin-top:-8px; margin-bottom:8px;"></div>
         </div>
         <div>
           <label>Jumlah pack dibeli *</label>
@@ -156,6 +158,13 @@
           <input id="fPackPrice" type="number" min="0" placeholder="Contoh: 10000" oninput="updateBuyPreview()">
         </div>
       </div>
+      <div id="targetItemBanner" style="display:none; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#1e40af;"></div>
+      <label>Foto barang (opsional)</label>
+      <input id="fPhoto" type="file" accept="image/*" onchange="handlePhotoSelect(event)">
+      <div id="photoPreviewWrap" style="display:none; margin-bottom:12px;">
+        <img id="photoPreview" style="max-width:120px; max-height:120px; border-radius:8px; border:1px solid #e5e7eb;">
+        <button type="button" class="btn-secondary" style="width:auto; margin-left:8px; padding:6px 10px;" onclick="clearPhoto()">Hapus Foto</button>
+      </div>
       <label>Tanggal & jam stok masuk *</label>
       <input id="fDateTime" type="datetime-local">
       <div id="buyPreview" style="background:#f0f9ff; border:1px solid #bae6fd; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#0369a1; display:none;"></div>
@@ -168,6 +177,7 @@
 
     <div class="card">
       <h2>Daftar Stok Barang</h2>
+      <input id="stockSearch" placeholder="🔍 Ketik nama barang untuk mencari (contoh: case ip 17 pm)..." oninput="renderStock()" style="margin-bottom:12px;">
       <button class="btn-secondary" style="width:auto; margin-bottom:12px;" onclick="exportStockCSV()">⬇ Export Stok ke CSV/Excel</button>
       <div id="stockTableWrap"></div>
     </div>
@@ -284,6 +294,48 @@
   </div>
 </div>
 
+<div class="modal-bg" id="editSaleModalBg">
+  <div class="modal">
+    <h2>Edit Transaksi Penjualan</h2>
+    <p class="sub">Mengubah jumlah akan otomatis menyesuaikan sisa stok barang terkait.</p>
+    <label>Barang</label>
+    <input id="esItemName" disabled>
+    <div class="grid2">
+      <div>
+        <label>Jumlah terjual *</label>
+        <input id="esQty" type="number" min="1">
+      </div>
+      <div>
+        <label>Harga jual / unit (Rp) *</label>
+        <input id="esPrice" type="number" min="0">
+      </div>
+      <div>
+        <label>Diskon total (Rp)</label>
+        <input id="esDiscount" type="number" min="0">
+      </div>
+      <div>
+        <label>Nomor telepon</label>
+        <input id="esPhone">
+      </div>
+      <div>
+        <label>No. referensi</label>
+        <input id="esRef">
+      </div>
+      <div>
+        <label>Tanggal & jam</label>
+        <input id="esDateTime" type="datetime-local">
+      </div>
+    </div>
+    <label>Alamat</label>
+    <input id="esAddress">
+    <div id="editSaleErr" class="err"></div>
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button class="btn-secondary" onclick="closeEditSale()">Batal</button>
+      <button class="btn-primary" style="width:auto;" onclick="saveEditSale()" id="editSaleBtn">Simpan Perubahan</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const firebaseConfig = {
   apiKey: "AIzaSyBgMgvr9MwpwrDv9BoWhzoDDiEdiDLVZWk",
@@ -328,6 +380,9 @@ let itemsRef = null;
 let salesRef = null;
 let activeTab = 'stock';
 let midnightCheckTimer = null;
+let selectedTargetItemId = null;
+let currentPhotoBase64 = null;
+let editingSaleId = null;
 
 function fmtRp(n) {
   n = Number(n) || 0;
@@ -596,6 +651,10 @@ function clearForm() {
   document.getElementById('fPackSize').value = '';
   document.getElementById('fPackPrice').value = '';
   document.getElementById('formErr').style.display = 'none';
+  document.getElementById('suggestBoxPcs').style.display = 'none';
+  document.getElementById('suggestBoxPack').style.display = 'none';
+  document.getElementById('targetItemBanner').style.display = 'none';
+  selectedTargetItemId = null;
   setDefaultDateTime('fDateTime');
 }
 
@@ -651,31 +710,44 @@ async function saveItem() {
   saveBtn.disabled = true;
   const newUnitPrice = addTotal / addQty;
   const chosenTime = getDateTimeValue('fDateTime');
+  const photoToSave = currentPhotoBase64;
 
   try {
-    if (editingId) {
-      const current = items[editingId] || {};
+    const mergeTargetId = editingId || selectedTargetItemId;
+    if (mergeTargetId && items[mergeTargetId]) {
+      const current = items[mergeTargetId] || {};
       const oldQty = Number(current.qty) || 0;
       const oldBuyPrice = Number(current.buyPrice) || 0;
       const oldValue = oldQty * oldBuyPrice;
       const newValue = addQty * newUnitPrice;
       const combinedQty = oldQty + addQty;
       const weightedBuyPrice = combinedQty > 0 ? (oldValue + newValue) / combinedQty : newUnitPrice;
-      await itemsRef.child(editingId).update({
-        name, qty: combinedQty, buyPrice: weightedBuyPrice, updatedAt: chosenTime
+      const updatePayload = { qty: combinedQty, buyPrice: weightedBuyPrice, updatedAt: chosenTime };
+      if (editingId) updatePayload.name = name;
+      if (photoToSave) updatePayload.photo = photoToSave;
+      await itemsRef.child(mergeTargetId).update(updatePayload);
+      await itemsRef.child(mergeTargetId).child('batches').push({
+        qty: addQty, buyPrice: newUnitPrice, totalBuy: addTotal, createdAt: chosenTime
       });
       editingId = null;
+      selectedTargetItemId = null;
       document.getElementById('formTitle').textContent = 'Tambah / Update Stok Barang';
       document.getElementById('saveBtn').textContent = 'Simpan Stok';
       document.getElementById('cancelEditBtn').style.display = 'none';
+      document.getElementById('targetItemBanner').style.display = 'none';
     } else {
-      await itemsRef.push({
+      const newItemRef = await itemsRef.push({
         name, qty: addQty, buyPrice: newUnitPrice,
-        createdAt: chosenTime, updatedAt: chosenTime
+        createdAt: chosenTime, updatedAt: chosenTime,
+        photo: photoToSave || null
+      });
+      await newItemRef.child('batches').push({
+        qty: addQty, buyPrice: newUnitPrice, totalBuy: addTotal, createdAt: chosenTime
       });
     }
     clearForm();
     document.getElementById('buyPreview').style.display = 'none';
+    clearPhoto();
   } catch (e) {
     errEl.textContent = 'Gagal menyimpan data. Periksa koneksi internet dan coba lagi.';
     errEl.style.display = 'block';
@@ -742,6 +814,94 @@ async function confirmDelete() {
     alert('Gagal menghapus data. Periksa koneksi internet.');
   }
   closeConfirm();
+}
+
+function editSale(id) {
+  const sale = sales[id];
+  if (!sale) return;
+  editingSaleId = id;
+  document.getElementById('esItemName').value = sale.itemName || '-';
+  document.getElementById('esQty').value = sale.qty || '';
+  document.getElementById('esPrice').value = sale.sellPrice || '';
+  document.getElementById('esDiscount').value = sale.discount || '';
+  document.getElementById('esPhone').value = sale.phone || '';
+  document.getElementById('esRef').value = sale.ref || '';
+  document.getElementById('esAddress').value = sale.address || '';
+  document.getElementById('esDateTime').value = sale.createdAt ? toLocalDateTimeInputValue(sale.createdAt) : '';
+  document.getElementById('editSaleErr').style.display = 'none';
+  document.getElementById('editSaleModalBg').style.display = 'flex';
+}
+
+function closeEditSale() {
+  editingSaleId = null;
+  document.getElementById('editSaleModalBg').style.display = 'none';
+}
+
+async function saveEditSale() {
+  const sale = sales[editingSaleId];
+  const errEl = document.getElementById('editSaleErr');
+  errEl.style.display = 'none';
+  if (!sale) { closeEditSale(); return; }
+
+  const newQty = Number(document.getElementById('esQty').value);
+  const newPrice = Number(document.getElementById('esPrice').value);
+  const newDiscount = Number(document.getElementById('esDiscount').value) || 0;
+  const newPhone = document.getElementById('esPhone').value.trim();
+  const newRef = document.getElementById('esRef').value.trim();
+  const newAddress = document.getElementById('esAddress').value.trim();
+  const newTime = getDateTimeValue('esDateTime');
+
+  if (!newQty || newQty <= 0) {
+    errEl.textContent = 'Jumlah terjual wajib diisi dengan angka lebih dari 0.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (newPrice < 0 || isNaN(newPrice)) {
+    errEl.textContent = 'Harga jual wajib diisi dengan angka valid.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (newDiscount > newQty * newPrice) {
+    errEl.textContent = 'Diskon tidak boleh lebih besar dari subtotal.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const item = items[sale.itemId];
+  const oldQty = Number(sale.qty) || 0;
+  const qtyDiff = newQty - oldQty;
+
+  if (item) {
+    const currentItemStock = Number(item.qty) || 0;
+    const stockAfterChange = currentItemStock - qtyDiff;
+    if (stockAfterChange < 0) {
+      errEl.textContent = 'Perubahan jumlah ini butuh stok tambahan ' + Math.abs(stockAfterChange) + ' pcs yang tidak tersedia.';
+      errEl.style.display = 'block';
+      return;
+    }
+  }
+
+  const btn = document.getElementById('editSaleBtn');
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan...';
+
+  try {
+    if (item) {
+      const currentItemStock = Number(item.qty) || 0;
+      await itemsRef.child(sale.itemId).update({ qty: currentItemStock - qtyDiff, updatedAt: Date.now() });
+    }
+    await salesRef.child(editingSaleId).update({
+      qty: newQty, sellPrice: newPrice, discount: newDiscount,
+      phone: newPhone, ref: newRef, address: newAddress, createdAt: newTime
+    });
+    closeEditSale();
+  } catch (e) {
+    errEl.textContent = 'Gagal menyimpan perubahan. Periksa koneksi internet.';
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Simpan Perubahan';
+  }
 }
 
 function renderSaleItemOptions() {
@@ -872,28 +1032,43 @@ function isSameLocalDay(ts, ref) {
 }
 
 function renderStock() {
-  const list = Object.keys(items).map(id => ({ id, ...items[id] }));
+  const searchVal = normalizeName(document.getElementById('stockSearch') ? document.getElementById('stockSearch').value : '');
+  let list = Object.keys(items).map(id => ({ id, ...items[id] }));
+  if (searchVal) {
+    list = list.filter(i => normalizeName(i.name).includes(searchVal));
+  }
   const wrap = document.getElementById('stockTableWrap');
   if (list.length === 0) {
-    wrap.innerHTML = '<div class="empty">Belum ada data stok. Tambahkan di atas.</div>';
+    wrap.innerHTML = '<div class="empty">' + (searchVal ? 'Tidak ada barang yang cocok dengan pencarian.' : 'Belum ada data stok. Tambahkan di atas.') + '</div>';
     return;
   }
   const sorted = list.sort((a,b) => (b.updatedAt||b.createdAt||0) - (a.updatedAt||a.createdAt||0));
   let html = '<div style="overflow-x:auto;"><table><thead><tr>' +
-    '<th>Barang</th><th>Sisa stok</th><th>Harga beli/unit</th><th>Total modal</th><th>Aksi</th>' +
+    '<th>Foto</th><th>Barang</th><th>Sisa stok</th><th>Harga beli/unit (avg)</th><th>Total modal</th><th>Aksi</th>' +
     '</tr></thead><tbody>';
   sorted.forEach(i => {
     const q = Number(i.qty)||0;
     const tb = q * (Number(i.buyPrice)||0);
     const badge = q <= 5 ? '<span class="badge badge-low">Stok rendah</span>' : '<span class="badge badge-ok">Aman</span>';
+    const photoHtml = i.photo ? '<img src="' + i.photo + '" style="width:44px; height:44px; object-fit:cover; border-radius:6px;">' : '<div style="width:44px; height:44px; background:#f3f4f6; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#9ca3af; font-size:10px;">No foto</div>';
+    const batches = i.batches ? Object.values(i.batches).sort((a,b) => (b.createdAt||0)-(a.createdAt||0)) : [];
     html += '<tr>' +
-      '<td>' + escapeHtml(i.name) + '<br>' + badge + '</td>' +
+      '<td>' + photoHtml + '</td>' +
+      '<td><a href="#" onclick="toggleBatchHistory(\'' + i.id + '\'); return false;" style="color:#2563eb; text-decoration:none; font-weight:600;">' + escapeHtml(i.name) + '</a><br>' + badge +
+        (batches.length > 0 ? '<br><span class="small" style="color:#2563eb; cursor:pointer;" onclick="toggleBatchHistory(\'' + i.id + '\')">📋 Lihat rincian harga (' + batches.length + ' batch)</span>' : '') + '</td>' +
       '<td>' + q + '</td>' +
       '<td class="tc-r">' + fmtRp(i.buyPrice) + '</td>' +
       '<td class="tc-r">' + fmtRp(tb) + '</td>' +
       '<td class="actions"><button class="btn-edit" onclick="editItem(\'' + i.id + '\')">Edit</button>' +
       '<button class="btn-danger" onclick="askDelete(\'item\',\'' + i.id + '\')">Hapus</button></td>' +
       '</tr>';
+    if (batches.length > 0) {
+      html += '<tr id="batchRow-' + i.id + '" style="display:none;"><td colspan="6" style="background:#f8fafc; padding:12px;">' +
+        '<div class="small" style="font-weight:700; margin-bottom:6px;">Rincian harga beli per batch:</div>' +
+        '<table style="width:100%; font-size:12px;"><thead><tr><th>Tanggal Beli</th><th>Jumlah</th><th>Harga/pcs</th><th>Total Beli</th></tr></thead><tbody>' +
+        batches.map(b => '<tr><td>' + (b.createdAt ? new Date(b.createdAt).toLocaleString('id-ID') : '-') + '</td><td>' + (Number(b.qty)||0) + ' pcs</td><td>' + fmtRp(b.buyPrice) + '</td><td>' + fmtRp(b.totalBuy) + '</td></tr>').join('') +
+        '</tbody></table></td></tr>';
+    }
   });
   html += '</tbody></table></div>';
   wrap.innerHTML = html;
@@ -1048,7 +1223,7 @@ function renderReport() {
     return;
   }
   let html2 = '<div style="overflow-x:auto;"><table><thead><tr>' +
-    '<th>Tanggal</th><th>Barang</th><th>Qty</th><th>Harga jual</th><th>Diskon</th><th>Total</th><th>Profit</th><th>Telepon</th><th>No. Ref</th>' +
+    '<th>Tanggal</th><th>Barang</th><th>Qty</th><th>Harga jual</th><th>Diskon</th><th>Total</th><th>Profit</th><th>Telepon</th><th>No. Ref</th><th>Aksi</th>' +
     '</tr></thead><tbody>';
   saleList.forEach(s => {
     const q = Number(s.qty)||0;
@@ -1068,6 +1243,7 @@ function renderReport() {
       '<td class="tc-r" style="color:' + (profit>=0?'#166534':'#b91c1c') + '; font-weight:700;">' + fmtRp(profit) + '</td>' +
       '<td>' + escapeHtml(s.phone||'-') + '</td>' +
       '<td>' + escapeHtml(s.ref||'-') + '</td>' +
+      '<td class="actions"><button class="btn-edit" onclick="editSale(\'' + s.id + '\')">Edit</button><button class="btn-danger" onclick="askDelete(\'sale\',\'' + s.id + '\')">Hapus</button></td>' +
       '</tr>';
   });
   html2 += '</tbody></table></div>';
@@ -1159,6 +1335,70 @@ function updateItemNameDatalist() {
 }
 
 function normalizeName2(s) { return normalizeName(s); }
+
+function handlePhotoSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const maxDim = 400;
+      let w = img.width, h = img.height;
+      if (w > h && w > maxDim) { h = h * (maxDim / w); w = maxDim; }
+      else if (h > maxDim) { w = w * (maxDim / h); h = maxDim; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      currentPhotoBase64 = canvas.toDataURL('image/jpeg', 0.6);
+      document.getElementById('photoPreview').src = currentPhotoBase64;
+      document.getElementById('photoPreviewWrap').style.display = 'block';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearPhoto() {
+  currentPhotoBase64 = null;
+  document.getElementById('fPhoto').value = '';
+  document.getElementById('photoPreviewWrap').style.display = 'none';
+}
+
+function showNameSuggestions(inputId, boxId) {
+  const val = document.getElementById(inputId).value;
+  const norm = normalizeName(val);
+  const box = document.getElementById(boxId);
+  selectedTargetItemId = null;
+  document.getElementById('targetItemBanner').style.display = 'none';
+  if (!norm || norm.length < 2) { box.style.display = 'none'; return; }
+  const list = Object.keys(items).map(id => ({ id, ...items[id] }))
+    .filter(i => normalizeName(i.name).includes(norm));
+  if (list.length === 0) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.innerHTML = '<div class="small" style="margin-bottom:4px;">Barang mirip yang sudah ada — klik untuk tambah stok ke barang ini:</div>' +
+    list.map(i => '<button type="button" onclick="selectTargetItem(\'' + i.id + '\',\'' + inputId + '\')" style="background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; border-radius:6px; padding:4px 10px; margin:2px 4px 2px 0; font-size:12px; font-weight:600;">' +
+    escapeHtml(i.name) + ' (sisa ' + (Number(i.qty)||0) + ')</button>').join('');
+}
+
+function selectTargetItem(itemId, inputId) {
+  const item = items[itemId];
+  if (!item) return;
+  selectedTargetItemId = itemId;
+  document.getElementById(inputId).value = item.name;
+  document.getElementById('targetItemBanner').style.display = 'block';
+  document.getElementById('targetItemBanner').innerHTML = '✓ Stok ini akan ditambahkan ke barang: <b>' + escapeHtml(item.name) +
+    '</b> (sisa saat ini: ' + (Number(item.qty)||0) + ' pcs, harga rata-rata: ' + fmtRp(item.buyPrice) + '/pcs)';
+  document.getElementById('suggestBoxPcs').style.display = 'none';
+  document.getElementById('suggestBoxPack').style.display = 'none';
+}
+
+function toggleBatchHistory(itemId) {
+  const row = document.getElementById('batchRow-' + itemId);
+  if (!row) return;
+  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
 
 function escapeHtml(str) {
   const div = document.createElement('div');
