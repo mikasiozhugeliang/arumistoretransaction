@@ -6,6 +6,7 @@
 <title>Aplikasi Stok & Penjualan</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f2f4f7; margin:0; padding:0; color:#1f2937; }
@@ -123,7 +124,9 @@
       <div id="pcsModeFields" class="grid3">
         <div>
           <label>Nama barang *</label>
-          <input id="fName" placeholder="Contoh: Beras 5kg">
+          <input id="fName" list="itemNameList" placeholder="Contoh: Beras 5kg" oninput="checkDuplicateName('fName','dupWarnPcs')">
+          <datalist id="itemNameList"></datalist>
+          <div id="dupWarnPcs" class="small" style="color:#b45309; margin-top:-8px; margin-bottom:8px; display:none;"></div>
         </div>
         <div>
           <label>Jumlah stok masuk (pcs) *</label>
@@ -137,7 +140,8 @@
       <div id="packModeFields" class="grid3" style="display:none;">
         <div>
           <label>Nama barang *</label>
-          <input id="fNamePack" placeholder="Contoh: Indomie Goreng">
+          <input id="fNamePack" list="itemNameList" placeholder="Contoh: Indomie Goreng" oninput="checkDuplicateName('fNamePack','dupWarnPack')">
+          <div id="dupWarnPack" class="small" style="color:#b45309; margin-top:-8px; margin-bottom:8px; display:none;"></div>
         </div>
         <div>
           <label>Jumlah pack dibeli *</label>
@@ -164,6 +168,7 @@
 
     <div class="card">
       <h2>Daftar Stok Barang</h2>
+      <button class="btn-secondary" style="width:auto; margin-bottom:12px;" onclick="exportStockCSV()">⬇ Export Stok ke CSV/Excel</button>
       <div id="stockTableWrap"></div>
     </div>
   </div>
@@ -262,6 +267,7 @@
 
     <div class="card">
       <h2>Semua Transaksi dalam Periode Ini</h2>
+      <button class="btn-secondary" style="width:auto; margin-bottom:12px;" onclick="exportReportCSV()">⬇ Export ke CSV/Excel</button>
       <div id="reportListWrap"></div>
     </div>
   </div>
@@ -291,6 +297,7 @@ const firebaseConfig = {
 
 let db = null;
 let firebaseReady = false;
+let authReady = false;
 try {
   firebase.initializeApp(firebaseConfig);
   db = firebase.database();
@@ -298,6 +305,19 @@ try {
 } catch (e) {
   firebaseReady = false;
 }
+
+async function ensureAuth() {
+  if (authReady) return true;
+  try {
+    await firebase.auth().signInAnonymously();
+    authReady = true;
+    return true;
+  } catch (e) {
+    authReady = false;
+    return false;
+  }
+}
+if (firebaseReady) { ensureAuth(); }
 
 let currentPin = null;
 let items = {};
@@ -414,6 +434,14 @@ async function tryLogin() {
   }
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Memeriksa...';
+  const okAuth = await ensureAuth();
+  if (!okAuth) {
+    errEl.textContent = 'Gagal autentikasi ke database. Periksa koneksi internet.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Masuk';
+    return;
+  }
   try {
     const snap = await db.ref('pins/' + pin + '/meta').once('value');
     if (!snap.exists()) {
@@ -454,6 +482,14 @@ async function createPin() {
   }
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Memeriksa...';
+  const okAuth = await ensureAuth();
+  if (!okAuth) {
+    errEl.textContent = 'Gagal autentikasi ke database. Periksa koneksi internet.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Buat PIN Baru';
+    return;
+  }
   try {
     const adminSnap = await db.ref('adminKey').once('value');
     const validKey = adminSnap.val();
@@ -520,6 +556,7 @@ function startApp() {
     renderStock();
     renderSaleItemOptions();
     renderStats();
+    updateItemNameDatalist();
     if (activeTab === 'report') renderReport();
   }, () => {
     statusBar.className = 'status off';
@@ -1036,6 +1073,92 @@ function renderReport() {
   html2 += '</tbody></table></div>';
   listWrap.innerHTML = html2;
 }
+
+function downloadCSV(filename, rows) {
+  const csvContent = rows.map(row => row.map(cell => {
+    const str = String(cell == null ? '' : cell).replace(/"/g, '""');
+    return '"' + str + '"';
+  }).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportStockCSV() {
+  const list = Object.keys(items).map(id => ({ id, ...items[id] }));
+  const rows = [['Nama Barang', 'Sisa Stok (pcs)', 'Harga Beli per Pcs (Rp)', 'Total Modal (Rp)']];
+  list.forEach(i => {
+    const q = Number(i.qty) || 0;
+    const buy = Number(i.buyPrice) || 0;
+    rows.push([i.name, q, Math.round(buy), Math.round(q * buy)]);
+  });
+  const dateStr = new Date().toISOString().slice(0,10);
+  downloadCSV('stok-barang-' + dateStr + '.csv', rows);
+}
+
+function exportReportCSV() {
+  const fromStr = document.getElementById('reportFrom').value;
+  const toStr = document.getElementById('reportTo').value;
+  if (!fromStr || !toStr) { alert('Pilih periode laporan dulu.'); return; }
+  const fromTs = new Date(fromStr + 'T00:00:00').getTime();
+  const toTs = new Date(toStr + 'T23:59:59').getTime();
+  const saleList = Object.keys(sales).map(id => ({ id, ...sales[id] }))
+    .filter(s => s.createdAt >= fromTs && s.createdAt <= toTs)
+    .sort((a,b) => (a.createdAt||0) - (b.createdAt||0));
+
+  const rows = [['Tanggal & Jam', 'Barang', 'Qty', 'Harga Jual/unit (Rp)', 'Diskon (Rp)', 'Total Setelah Diskon (Rp)', 'Harga Beli/pcs (Rp)', 'Profit (Rp)', 'No. Telepon', 'Alamat', 'No. Referensi']];
+  saleList.forEach(s => {
+    const q = Number(s.qty) || 0;
+    const subtotal = q * (Number(s.sellPrice)||0);
+    const discount = Number(s.discount) || 0;
+    const total = Math.max(0, subtotal - discount);
+    const buyPcs = s.buyPriceAtSale !== undefined ? Number(s.buyPriceAtSale) : (items[s.itemId] ? Number(items[s.itemId].buyPrice)||0 : 0);
+    const profit = total - (buyPcs * q);
+    const dateStr = s.createdAt ? new Date(s.createdAt).toLocaleString('id-ID') : '-';
+    rows.push([dateStr, s.itemName||'-', q, Math.round(s.sellPrice||0), Math.round(discount), Math.round(total), Math.round(buyPcs), Math.round(profit), s.phone||'-', s.address||'-', s.ref||'-']);
+  });
+
+  downloadCSV('laporan-penjualan-' + fromStr + '_sd_' + toStr + '.csv', rows);
+}
+
+function normalizeName(s) {
+  return (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function checkDuplicateName(inputId, warnId) {
+  const val = document.getElementById(inputId).value;
+  const norm = normalizeName(val);
+  const warnEl = document.getElementById(warnId);
+  if (!norm) { warnEl.style.display = 'none'; return; }
+  const existingNames = Object.values(items).map(i => i.name || '');
+  const exactMatch = existingNames.find(n => normalizeName(n) === norm);
+  if (exactMatch && exactMatch !== val) {
+    warnEl.textContent = '⚠ Barang ini sudah ada dengan nama "' + exactMatch + '" — akan ditambahkan sebagai stok baru terpisah kecuali Anda samakan penulisannya persis.';
+    warnEl.style.display = 'block';
+    return;
+  }
+  const similar = existingNames.find(n => n !== val && normalizeName(n).includes(norm.split(' ')[0]) && norm.split(' ')[0].length >= 3);
+  if (similar && !existingNames.includes(val)) {
+    warnEl.textContent = '💡 Sudah ada barang mirip: "' + similar + '". Pastikan penulisan namanya sama persis kalau ini barang yang sama.';
+    warnEl.style.display = 'block';
+  } else {
+    warnEl.style.display = 'none';
+  }
+}
+
+function updateItemNameDatalist() {
+  const dl = document.getElementById('itemNameList');
+  const names = [...new Set(Object.values(items).map(i => i.name).filter(Boolean))];
+  dl.innerHTML = names.map(n => '<option value="' + n.replace(/"/g, '&quot;') + '">').join('');
+}
+
+function normalizeName2(s) { return normalizeName(s); }
 
 function escapeHtml(str) {
   const div = document.createElement('div');
